@@ -1,1 +1,6 @@
-
+streamlit
+numpy
+rasterio
+matplotlib
+folium
+streamlit-folium
