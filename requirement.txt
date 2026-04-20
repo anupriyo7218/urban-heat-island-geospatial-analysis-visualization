@@ -1,6 +1,7 @@
 streamlit
 numpy
-rasterio
 matplotlib
 folium
 streamlit-folium
+rasterio
+requests
