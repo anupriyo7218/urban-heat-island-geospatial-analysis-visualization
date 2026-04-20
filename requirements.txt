@@ -4,4 +4,4 @@ matplotlib
 folium
 streamlit-folium
 requests
-rasterio==1.3.9
+Pillow
