@@ -31,48 +31,29 @@ else:
     layer = None
     opacity = 0.7
 
-# -------- SAFE LOAD DATA --------
+# -------- LOAD DATA --------
 @st.cache_data
 def load_data():
-
     def load_tif(url):
         try:
-            r = requests.get(url, timeout=30)
-            r.raise_for_status()
-
+            r = requests.get(url)
             img = Image.open(BytesIO(r.content))
             arr = np.array(img).astype(float)
-
-            # ensure 2D
             if arr.ndim > 2:
                 arr = arr[:, :, 0]
-
             return arr[::5, ::5]
-
-        except Exception:
-            # always return fallback so app never crashes
+        except:
             return np.zeros((200, 200))
 
-    B4_URL = "https://drive.google.com/uc?id=1-HBxOXTgztez8l3SyoT8BDL_spI-OpNy"
-    B5_URL = "https://drive.google.com/uc?id=1Wh9InqB4Kzv3zzcHVd2TMsbRdlnU4710"
-    B10_URL = "https://drive.google.com/uc?id=1r0ga3m4jWg0BVA2APWPt76Wauxh8bHwE"
+    B4 = "https://drive.google.com/uc?id=1-HBxOXTgztez8l3SyoT8BDL_spI-OpNy"
+    B5 = "https://drive.google.com/uc?id=1Wh9InqB4Kzv3zzcHVd2TMsbRdlnU4710"
+    B10 = "https://drive.google.com/uc?id=1r0ga3m4jWg0BVA2APWPt76Wauxh8bHwE"
 
-    red = load_tif(B4_URL)
-    nir = load_tif(B5_URL)
-    thermal = load_tif(B10_URL)
+    return load_tif(B4), load_tif(B5), load_tif(B10)
 
-    return red, nir, thermal
+red, nir, thermal = load_data()
 
-
-# -------- CALL SAFELY --------
-try:
-    red, nir, thermal = load_data()
-except Exception:
-    red = np.zeros((200, 200))
-    nir = np.zeros((200, 200))
-    thermal = np.zeros((200, 200))
-
-# -------- CLEAN DATA --------
+# -------- CLEAN --------
 red = np.where(red == 0, np.nan, red)
 nir = np.where(nir == 0, np.nan, nir)
 thermal = np.where(thermal == 0, np.nan, thermal)
@@ -81,80 +62,136 @@ thermal = np.where(thermal == 0, np.nan, thermal)
 ndvi = (nir - red) / (nir + red + 1e-10)
 ndvi = np.clip(ndvi, -1, 1)
 
-# -------- TEMPERATURE --------
+# -------- TEMP --------
 temperature = thermal * 0.00341802 + 149.0
 temperature_c = temperature - 273.15
 temperature_c[(temperature_c < -50) | (temperature_c > 80)] = np.nan
 
-# -------- RESCALE --------
-def rescale_temp(arr):
-    valid = arr[~np.isnan(arr)]
-    if len(valid) == 0:
-        return arr
-    low = np.percentile(valid, 2)
-    high = np.percentile(valid, 98)
-    norm = (np.clip(arr, low, high) - low) / (high - low + 1e-10)
-    return norm * 25 + 20
+# -------- RESCALE TEMP --------
+def rescale(arr):
+    v = arr[~np.isnan(arr)]
+    if len(v) == 0: return arr
+    lo, hi = np.percentile(v, 2), np.percentile(v, 98)
+    return ((np.clip(arr, lo, hi) - lo) / (hi - lo + 1e-10)) * 25 + 20
 
-temperature_display = rescale_temp(temperature_c)
+temp_disp = rescale(temperature_c)
 
-# -------- NORMALIZATION --------
-def safe_norm(arr):
-    if np.all(np.isnan(arr)):
-        return np.zeros_like(arr)
+# -------- NORMALIZE --------
+def norm(arr):
+    if np.all(np.isnan(arr)): return np.zeros_like(arr)
     return (arr - np.nanmin(arr)) / (np.nanmax(arr) - np.nanmin(arr) + 1e-10)
 
-ndvi_norm = safe_norm(ndvi)
-temp_norm = safe_norm(temperature_c)
-
-# -------- UHI --------
-uhi = temp_norm - ndvi_norm
-uhi_std = (uhi - np.nanmean(uhi)) / (np.nanstd(uhi) + 1e-10)
-uhi_std = np.clip(uhi_std, -2, 2)
+uhi = norm(temperature_c) - norm(ndvi)
+uhi = (uhi - np.nanmean(uhi)) / (np.nanstd(uhi) + 1e-10)
+uhi = np.clip(uhi, -2, 2)
 
 # -------- IMAGE --------
-def array_to_image(arr, cmap_name):
-    cmap = plt.get_cmap(cmap_name)
-    norm = (arr - np.nanmin(arr)) / (np.nanmax(arr) - np.nanmin(arr) + 1e-10)
-    rgba = cmap(norm)
+def to_img(arr, cmap):
+    c = plt.get_cmap(cmap)
+    n = norm(arr)
+    rgba = c(n)
     rgba[..., 3] = np.where(np.isnan(arr), 0, 1)
     return (rgba * 255).astype(np.uint8)
 
+# -------- LEGEND --------
+def legend(title, vmin, vmax):
+    st.markdown(f"### 🎨 {title} | Min: {round(vmin,2)} | Max: {round(vmax,2)}")
+
 # ===============================
-# SINGLE MODE
+# 🔥 COMPARISON MODE
 # ===============================
-if mode == "Single Layer":
-    m = folium.Map(location=[19.07, 72.87], zoom_start=10)
+if mode == "Comparison":
+
+    st.subheader("📊 NDVI vs Temperature Comparison")
+    st.info("📊 Comparison is fixed: NDVI vs Temperature (used to analyze Urban Heat Island effect)")
+
+    c1, c2 = st.columns(2)
+    c1.image(to_img(ndvi, "RdYlGn"), caption="NDVI")
+    c2.image(to_img(temp_disp, "inferno"), caption="Temperature (°C)")
+
+    nd = ndvi[~np.isnan(ndvi)]
+    tp = temp_disp[~np.isnan(temp_disp)]
+    n = min(len(nd), len(tp))
+    nd, tp = nd[:n], tp[:n]
+
+    st.subheader("📊 Comparison Statistics")
+
+    col1, col2 = st.columns(2)
+    col1.metric("NDVI Mean", round(np.mean(nd), 2))
+    col2.metric("Temp Mean (°C)", round(np.mean(tp), 2))
+
+    if n > 0:
+        corr = np.corrcoef(nd, tp)[0,1]
+        st.metric("Correlation", round(corr, 2))
+
+        if corr < -0.5:
+            st.success("🌿 Strong inverse relationship: Vegetation reduces temperature significantly.")
+        elif corr < -0.2:
+            st.info("🌱 Moderate inverse relationship: Vegetation helps reduce temperature.")
+        else:
+            st.warning("⚠️ Weak correlation observed. Urban temperature is influenced by multiple factors such as built-up areas, materials, and coastal effects, not just vegetation.")
+
+    fig, ax = plt.subplots()
+    ax.scatter(nd, tp, s=1)
+    ax.set_xlabel("NDVI")
+    ax.set_ylabel("Temperature (°C)")
+    st.pyplot(fig)
+
+# ===============================
+# 🔥 SINGLE LAYER
+# ===============================
+else:
+
+    m = folium.Map(location=[19.07,72.87], zoom_start=10)
 
     if layer == "NDVI":
-        data, img = ndvi, array_to_image(ndvi, "RdYlGn")
+        data, img = ndvi, to_img(ndvi,"RdYlGn")
+        legend("NDVI Scale", -1, 1)
+
     elif layer == "Temperature":
-        data, img = temperature_display, array_to_image(temperature_display, "inferno")
+        data, img = temp_disp, to_img(temp_disp,"inferno")
+        legend("Temperature (°C)", 20, 45)
+
     else:
-        data, img = uhi_std, array_to_image(uhi_std, "coolwarm")
+        data, img = uhi, to_img(uhi,"coolwarm")
+        legend("UHI Index", -2, 2)
 
     folium.raster_layers.ImageOverlay(
         image=img,
-        bounds=[[18.8, 72.6], [19.3, 73.2]],
+        bounds=[[18.8,72.6],[19.3,73.2]],
         opacity=opacity
     ).add_to(m)
 
     st_folium(m, width=900, height=600)
 
-    valid = data[~np.isnan(data)]
-    st.subheader("📊 Data Distribution")
+    # -------- SUMMARY --------
+    st.subheader("📊 Summary Statistics")
 
-    if len(valid) > 0:
-        fig, ax = plt.subplots()
-        ax.hist(valid, bins=50)
+    v = data[~np.isnan(data)]
+
+    c1, c2, c3 = st.columns(3)
+    if len(v)>0:
+        c1.metric("Mean", round(np.mean(v),2))
+        c2.metric("Min", round(np.min(v),2))
+        c3.metric("Max", round(np.max(v),2))
+
+    # NDVI vegetation
+    if layer=="NDVI" and len(v)>0:
+        veg = v[v>0.3]
+        st.info(f"🌱 Vegetation Coverage: {(len(veg)/len(v))*100:.2f}%")
+
+    # UHI hotspot
+    if layer=="UHI" and len(v)>0:
+        hot = np.percentile(v,95)
+        st.warning(f"🔥 UHI Hotspot Threshold: {round(hot,2)}")
+
+    # -------- HIST --------
+    st.subheader("📊 Data Distribution")
+    fig, ax = plt.subplots()
+    if len(v)>0:
+        ax.hist(v, bins=50)
+        ax.set_xlabel("Temperature (°C)" if layer=="Temperature" else "Value")
+        ax.set_ylabel("Pixel Count")
         st.pyplot(fig)
     else:
         st.warning("No valid data")
-
-# ===============================
-# COMPARISON MODE
-# ===============================
-else:
-    col1, col2 = st.columns(2)
-    col1.image(array_to_image(ndvi, "RdYlGn"), caption="NDVI")
-    col2.image(array_to_image(temperature_display, "inferno"), caption="Temperature")
