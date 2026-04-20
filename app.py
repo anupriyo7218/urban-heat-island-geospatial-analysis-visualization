@@ -1,12 +1,12 @@
 import streamlit as st
 import numpy as np
-import rasterio
 import matplotlib.pyplot as plt
 import folium
 from streamlit_folium import st_folium
 import matplotlib.cm as cm
 import requests
 from io import BytesIO
+from PIL import Image
 
 st.set_page_config(layout="wide")
 
@@ -30,28 +30,25 @@ if mode == "Single Layer":
     opacity = st.sidebar.slider("Overlay Opacity", 0.1, 1.0, 0.7)
 else:
     layer = None
-    opacity = 0.7  # default (used internally, not shown)
+    opacity = 0.7
 
-# -------- LOAD DATA FROM GOOGLE DRIVE --------
+# -------- LOAD DATA (NO RASTERIO) --------
 @st.cache(allow_output_mutation=True)
 def load_data():
 
     def load_tif(url):
         response = requests.get(url)
-        return rasterio.open(BytesIO(response.content))
+        img = Image.open(BytesIO(response.content))
+        arr = np.array(img).astype(float)
+        return arr[::5, ::5]
 
     B4_URL = "https://drive.google.com/uc?id=1-HBxOXTgztez8l3SyoT8BDL_spI-OpNy"
     B5_URL = "https://drive.google.com/uc?id=1Wh9InqB4Kzv3zzcHVd2TMsbRdlnU4710"
     B10_URL = "https://drive.google.com/uc?id=1r0ga3m4jWg0BVA2APWPt76Wauxh8bHwE"
 
-    with load_tif(B4_URL) as src:
-        red = src.read(1)[::5, ::5]
-
-    with load_tif(B5_URL) as src:
-        nir = src.read(1)[::5, ::5]
-
-    with load_tif(B10_URL) as src:
-        thermal = src.read(1)[::5, ::5]
+    red = load_tif(B4_URL)
+    nir = load_tif(B5_URL)
+    thermal = load_tif(B10_URL)
 
     return red, nir, thermal
 
@@ -141,7 +138,7 @@ if mode == "Comparison":
     with col2:
         st.image(array_to_image(temperature_display, 'inferno'), caption="Temperature (°C)")
         
-    st.info("📊 Comparison is fixed: NDVI vs Temperature (used to analyze Urban Heat Island effect)")
+    st.info("📊 Comparison is fixed: NDVI vs Temperature")
 
     ndvi_valid = ndvi[~np.isnan(ndvi)]
     temp_valid = temperature_display[~np.isnan(temperature_display)]
@@ -158,16 +155,7 @@ if mode == "Comparison":
 
     if min_len > 0:
         corr = np.corrcoef(ndvi_valid, temp_valid)[0, 1]
-        st.metric("NDVI vs Temperature Correlation", round(corr, 2))
-
-        if corr < -0.5:
-            st.success("🌿 Strong inverse relationship: Vegetation reduces temperature significantly.")
-        elif corr < -0.2:
-            st.info("🌱 Moderate inverse relationship: Vegetation helps reduce temperature.")
-        else:
-            st.warning("⚠️ Weak correlation observed. Urban temperature is influenced by multiple factors such as built-up areas, materials, and coastal effects, not just vegetation.")
-
-    st.subheader("📉 NDVI vs Temperature Relationship")
+        st.metric("Correlation", round(corr, 2))
 
     fig, ax = plt.subplots()
     ax.scatter(ndvi_valid, temp_valid, s=1)
@@ -216,16 +204,6 @@ else:
         col3.metric("Max", round(np.max(valid), 2))
     else:
         st.warning("No valid data")
-
-    if layer == "NDVI":
-        veg = ndvi[~np.isnan(ndvi)]
-        green = veg[veg > 0.3]
-        if len(veg) > 0:
-            st.info(f"🌱 Vegetation Coverage: {(len(green)/len(veg))*100:.2f}%")
-
-    if layer == "UHI":
-        hotspot = np.percentile(valid, 95)
-        st.warning(f"🔥 UHI Hotspot Threshold: {round(hotspot,2)}")
 
     st.subheader("📊 Data Distribution")
 
