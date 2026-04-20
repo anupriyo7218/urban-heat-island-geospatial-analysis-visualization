@@ -33,14 +33,22 @@ else:
     opacity = 0.7
 
 # -------- LOAD DATA (NO RASTERIO) --------
-@st.cache(allow_output_mutation=True)
+@st.cache_data
 def load_data():
 
     def load_tif(url):
-        response = requests.get(url)
-        img = Image.open(BytesIO(response.content))
-        arr = np.array(img).astype(float)
-        return arr[::5, ::5]
+        try:
+            response = requests.get(url)
+            response.raise_for_status()
+
+            img = Image.open(BytesIO(response.content))
+            arr = np.array(img).astype(float)
+
+            return arr[::5, ::5]
+
+        except Exception as e:
+            st.error(f"Error loading data from URL: {e}")
+            return np.full((100, 100), np.nan)  # fallback safe array
 
     B4_URL = "https://drive.google.com/uc?id=1-HBxOXTgztez8l3SyoT8BDL_spI-OpNy"
     B5_URL = "https://drive.google.com/uc?id=1Wh9InqB4Kzv3zzcHVd2TMsbRdlnU4710"
@@ -51,8 +59,6 @@ def load_data():
     thermal = load_tif(B10_URL)
 
     return red, nir, thermal
-
-red, nir, thermal = load_data()
 
 # -------- CLEAN DATA --------
 red = np.where(red == 0, np.nan, red)
