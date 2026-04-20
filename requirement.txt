@@ -3,5 +3,5 @@ numpy
 matplotlib
 folium
 streamlit-folium
-rasterio
 requests
+rasterio==1.3.9
